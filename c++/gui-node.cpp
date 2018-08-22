@@ -9,6 +9,9 @@
 #include <QIcon>
 #include <QPixmap>
 #include <QImage>
+#include <QPainter>
+#include <QTime>
+#include <QQueue>
 
 class CameraWindow : public QMainWindow
 {
@@ -38,13 +41,58 @@ private:
     QLabel *label;
 };
 
+class FPSMeter
+{
+public:
+    FPSMeter()
+    {
+        frameTime.start();
+    }
+
+    int measureTime()
+    {
+        return frameTime.restart();
+    }
+
+    float getAverageFPS()
+    {
+        int t = measureTime();
+        frameTimes.enqueue(t);
+        while(frameTimes.length() > averageNumSamples)
+            frameTimes.dequeue();
+        int sum = 0;
+        for(int t : frameTimes) sum += t;
+        return frameTimes.length() * 1000. / sum;
+    }
+
+    void draw(QImage *img)
+    {
+        QString text;
+        QPoint pos(20, 50), off(3, 3);
+        text.sprintf("FPS: %.1f", getAverageFPS());
+        QPainter p(img);
+        p.setFont(QFont("sans", 36));
+        p.setPen(Qt::black);
+        p.drawText(pos + off, text);
+        p.setPen(Qt::green);
+        p.drawText(pos, text);
+    }
+
+private:
+    QTime frameTime;
+    QQueue<int> frameTimes;
+    const int averageNumSamples = 20;
+};
+
 CameraWindow *win;
+FPSMeter *fpsMeter;
 
 void camera_callback(const std::string &msg)
 {
     std::vector<uchar> buf(msg.begin(), msg.end());
     cv::Mat frame = cv::imdecode(buf, cv::IMREAD_COLOR);
     QImage img((uchar*) frame.data, frame.cols, frame.rows, frame.step, QImage::Format_RGB888);
+    if(fpsMeter) fpsMeter->draw(&img);
     win->setImage(img);
 }
 
@@ -55,6 +103,7 @@ int main(int argc, char **argv)
     b0::Node node("camera-gui");
 
     win = new CameraWindow(node);
+    fpsMeter = new FPSMeter;
 
     b0::Subscriber camera_sub(&node, "camera", camera_callback);
     node.init();
